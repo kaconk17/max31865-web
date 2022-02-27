@@ -3,6 +3,7 @@
 #include <SPI.h>
 #include <EthernetENC.h>
 #include <Adafruit_MAX31865.h>
+#include <ArduinoJson.h>
 
 Adafruit_MAX31865 thermo = Adafruit_MAX31865(7, 8, 9, 6);
 
@@ -64,45 +65,43 @@ void setup() {
 }
 
 void loop() {
- 
+  StaticJsonDocument<200> doc;
   EthernetClient client = server.available();
   if (client) {
-  Serial.println("new client");
-  boolean currentLineIsBlank = true;
-  while (client.connected()) {
-  if (client.available()) {
-  char c = client.read();
-  Serial.write(c);
-  if (c == '\n' && currentLineIsBlank) {
-  client.println("HTTP/1.1 200 OK");
-  client.println("Content-Type: text/html");
-  client.println("Connection: close"); 
-  client.println("Refresh: 5"); 
-  client.println();
-  client.println("<!DOCTYPE HTML>");
-  client.println("<html>");
-  client.println("<h1>");
-  client.println("Temperatur Monitoring..:");
-  client.println("</h1>");
-  client.println("<br />");
-  client.println("<h2>");
-  client.println("Hasil Pengukuran : ");
-  client.print(thermo.temperature(RNOMINAL, RREF));
-  client.print(" C");
-  client.println("</h2>");
-  
-  client.println("</html>");
-  break;
-  }
-  if (c == '\n') {
-  currentLineIsBlank = true;
-  } else if (c != '\r') {
-  currentLineIsBlank = false;
-  }
-  }
-  }
-    delay(1);
-    client.stop();
-    Serial.println("client disconnected");
+    Serial.println("new client");
+    boolean currentLineIsBlank = true;
+    while (client.connected()) {
+      if (client.available()) {
+        char c = client.read();
+        Serial.write(c);
+        if (c == '\n' && currentLineIsBlank) {
+          uint16_t rtd = thermo.readRTD();
+          float ratio = rtd;
+          ratio /= 32768;
+          doc["success"] = currentLineIsBlank;
+          doc["rtd"] = rtd;
+          doc["ratio"] = ratio;
+          doc["resistance"] = RREF*ratio;
+          doc["temp"] = thermo.temperature(RNOMINAL, RREF);
+          client.println("HTTP/1.1 200 OK");
+          client.println("Content-Type: application/json");
+          client.println(F("Connection: close"));
+          client.print(F("Content-Length: "));
+          client.println(measureJsonPretty(doc));
+          client.println();
+          serializeJsonPretty(doc, client);
+
+          break;
+        }
+        if (c == '\n') {
+          currentLineIsBlank = true;
+        } else if (c != '\r') {
+          currentLineIsBlank = false;
+        }
+      }
+    }
+      delay(1);
+      client.stop();
+      Serial.println("client disconnected");
     }
 }
