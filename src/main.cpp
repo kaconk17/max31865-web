@@ -79,6 +79,7 @@ void loop() {
           float ratio = rtd;
           ratio /= 32768;
           doc["success"] = currentLineIsBlank;
+          doc["type"] = "TEMP";
           doc["rtd"] = rtd;
           doc["ratio"] = ratio;
           doc["resistance"] = RREF*ratio;
