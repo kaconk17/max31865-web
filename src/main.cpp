@@ -19,7 +19,8 @@ unsigned long lastMillis = 0;
 
 #define MQTT_DeviceName "DEV01"
 #define MQTT_topic_Message  "temp/DEV01"
-#define MQTT_Broker  "192.168.137.58"
+#define MQTT_out_topic  "req/DEV01"
+#define MQTT_Broker  "192.168.137.10"
 #define MQTT_Port  1883
 
 void callback(char* topic, byte* payload, unsigned int length);
@@ -30,20 +31,13 @@ PubSubClient client(MQTT_Broker,MQTT_Port,callback,net);
 // The 'nominal' 0-degrees-C resistance of the sensor
 // 100.0 for PT100, 1000.0 for PT1000
 #define RNOMINAL  100.0
-void callback(char* topic, byte* payload, unsigned int length) {
-  // In order to republish this payload, a copy must be made
-  // as the orignal payload buffer will be overwritten whilst
-  // constructing the PUBLISH packet.
 
-  // Allocate the correct amount of memory for the payload copy
-  byte* p = (byte*)malloc(length);
-  // Copy the payload to the new buffer
-  memcpy(p,payload,length);
-  client.publish("outTopic", p, length);
-  // Free the memory
-  free(p);
+void sendData(char* topic){
+  client.publish(topic,String(thermo.temperature(RNOMINAL, RREF)).c_str());
 }
-
+void callback(char* topic, byte* payload, unsigned int length) {
+  sendData(MQTT_out_topic);
+}
 void setup() {
  
   Serial.begin(19200);
@@ -79,13 +73,7 @@ while (!client.connect(MQTT_DeviceName))
 }
 Serial.println("\nconnected!");
 client.subscribe(MQTT_DeviceName);
-/*
-if (client.connect(MQTT_DeviceName)) {
-    Serial.println("Connected...");
-    client.publish("outTopic","hello world");
-    client.subscribe(MQTT_DeviceName);
-  }
-  */
+
 }
 
 void loop() {
@@ -93,6 +81,6 @@ void loop() {
  
 if (millis() - lastMillis > 10000) {
     lastMillis = millis();
-    client.publish(MQTT_topic_Message,String(thermo.temperature(RNOMINAL, RREF)).c_str());
+    sendData(MQTT_topic_Message);
   }
 }
