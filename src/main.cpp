@@ -1,40 +1,56 @@
-#include <Arduino.h>
 
 #include <SPI.h>
 #include <EthernetENC.h>
 #include <Adafruit_MAX31865.h>
-#include <ArduinoJson.h>
+#include <PubSubClient.h>
 
 Adafruit_MAX31865 thermo = Adafruit_MAX31865(7, 8, 9, 6);
 
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 
-// Set the static IP address to use if the DHCP fails to assign
-IPAddress ip(192, 168, 137, 177);
-EthernetServer server(80);
-// Initialize the Ethernet client library
-// with the IP address and port of the server
-// that you want to connect to (port 80 is default for HTTP):
+byte ip[] = {192, 168, 137, 177};
+byte mydns[] = {192, 168, 137, 1};
+byte gateway[] = {192, 168, 137, 1};
+byte subnet[] = {255, 255, 255, 0};
+
+EthernetClient net;
+
+unsigned long lastMillis = 0;
+
+#define MQTT_DeviceName "DEV01"
+#define MQTT_topic_Message  "temp/DEV01"
+#define MQTT_Broker  "192.168.137.58"
+#define MQTT_Port  1883
+
+void callback(char* topic, byte* payload, unsigned int length);
+
+PubSubClient client(MQTT_Broker,MQTT_Port,callback,net);
+
 #define RREF      430.0
 // The 'nominal' 0-degrees-C resistance of the sensor
 // 100.0 for PT100, 1000.0 for PT1000
 #define RNOMINAL  100.0
+void callback(char* topic, byte* payload, unsigned int length) {
+  // In order to republish this payload, a copy must be made
+  // as the orignal payload buffer will be overwritten whilst
+  // constructing the PUBLISH packet.
 
-// Variables to measure the speed
-unsigned long beginMicros, endMicros;
-unsigned long byteCount = 0;
-bool printWebData = true;  // set to false for better speed measurement
+  // Allocate the correct amount of memory for the payload copy
+  byte* p = (byte*)malloc(length);
+  // Copy the payload to the new buffer
+  memcpy(p,payload,length);
+  client.publish("outTopic", p, length);
+  // Free the memory
+  free(p);
+}
 
 void setup() {
  
   Serial.begin(19200);
-  Serial.println("Adafruit MAX31865 PT100 Sensor Test!");
+  
   thermo.begin(MAX31865_3WIRE);
-  while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB port only
-  }
 
-  // start the Ethernet connection:
+  //Ethernet.begin(mac, ip,mydns,gateway,subnet);
   Serial.println("Initialize Ethernet with DHCP:");
   if (Ethernet.begin(mac) == 0) {
     Serial.println("Failed to configure Ethernet using DHCP");
@@ -49,60 +65,34 @@ void setup() {
       Serial.println("Ethernet cable is not connected.");
     }
     // try to congifure using IP address instead of DHCP:
-    Ethernet.begin(mac, ip);
-    server.begin();
-    Serial.print("server is at ");
-    Serial.println(Ethernet.localIP());
+    Ethernet.begin(mac, ip, mydns);
   } else {
-    server.begin();
     Serial.print("  DHCP assigned IP ");
     Serial.println(Ethernet.localIP());
   }
-  // give the Ethernet shield a second to initialize:
+  
   delay(1000);
-  // if you get a connection, report back via serial:
- 
+while (!client.connect(MQTT_DeviceName))
+{
+    Serial.print(".");
+    delay(1000);
+}
+Serial.println("\nconnected!");
+client.subscribe(MQTT_DeviceName);
+/*
+if (client.connect(MQTT_DeviceName)) {
+    Serial.println("Connected...");
+    client.publish("outTopic","hello world");
+    client.subscribe(MQTT_DeviceName);
+  }
+  */
 }
 
 void loop() {
-  StaticJsonDocument<200> doc;
-  EthernetClient client = server.available();
-  if (client) {
-    Serial.println("new client");
-    boolean currentLineIsBlank = true;
-    while (client.connected()) {
-      if (client.available()) {
-        char c = client.read();
-        Serial.write(c);
-        if (c == '\n' && currentLineIsBlank) {
-          uint16_t rtd = thermo.readRTD();
-          float ratio = rtd;
-          ratio /= 32768;
-          doc["success"] = currentLineIsBlank;
-          doc["type"] = "TEMP";
-          doc["rtd"] = rtd;
-          doc["ratio"] = ratio;
-          doc["resistance"] = RREF*ratio;
-          doc["temp"] = thermo.temperature(RNOMINAL, RREF);
-          client.println("HTTP/1.1 200 OK");
-          client.println("Content-Type: application/json");
-          client.println(F("Connection: close"));
-          client.print(F("Content-Length: "));
-          client.println(measureJsonPretty(doc));
-          client.println();
-          serializeJsonPretty(doc, client);
-
-          break;
-        }
-        if (c == '\n') {
-          currentLineIsBlank = true;
-        } else if (c != '\r') {
-          currentLineIsBlank = false;
-        }
-      }
-    }
-      delay(1);
-      client.stop();
-      Serial.println("client disconnected");
-    }
+  client.loop();
+ 
+if (millis() - lastMillis > 10000) {
+    lastMillis = millis();
+    client.publish(MQTT_topic_Message,String(thermo.temperature(RNOMINAL, RREF)).c_str());
+  }
 }
